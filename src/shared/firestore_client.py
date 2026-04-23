@@ -114,3 +114,23 @@ def query_by_week(week: str) -> list[dict]:
         fields = doc.get("fields", {})
         results.append({k: _from_firestore_value(v) for k, v in fields.items()})
     return results
+
+
+def summarize_week(week: str) -> dict:
+    """Return aggregated summary for a given week.
+
+    Returns dict with keys: total_gross, total_net, total_tax, count, week.
+    """
+    docs = query_by_week(week)
+    if not docs:
+        return {"week": week, "total_gross": 0, "total_net": 0, "total_tax": 0, "count": 0}
+    total_gross = sum(d.get("amount_gross", 0) for d in docs)
+    total_net = sum(d.get("amount_net", 0) for d in docs)
+    total_tax = sum(d.get("tax_withheld", 0) for d in docs)
+    return {
+        "week": week,
+        "total_gross": round(total_gross, 2),
+        "total_net": round(total_net, 2),
+        "total_tax": round(total_tax, 2),
+        "count": len(docs),
+    }

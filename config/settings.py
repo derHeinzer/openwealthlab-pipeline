@@ -47,3 +47,6 @@ def get_service_account_info() -> dict:
 OWL_GITHUB_TOKEN: str = os.environ.get("OWL_GITHUB_TOKEN", "")
 OWL_GITHUB_REPO = "derHeinzer/openwealthlab"
 OWL_CONTENT_PATH = "src/content/dividend-logs"
+
+# ── Gemini (Google AI Studio) ──────────────────────────────────────
+GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")

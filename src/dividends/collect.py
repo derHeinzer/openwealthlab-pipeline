@@ -7,7 +7,10 @@ import logging
 from src.dividends.generate_markdown import push_markdown
 from src.dividends.tr_client import fetch_dividends
 from src.dividends.write_firestore import write_dividends
+from src.shared.firestore_client import summarize_week
+from src.shared.gemini_client import generate_commentary
 from src.shared.isin_mapping import enrich_dividends
+from src.shared.week_utils import prev_week, same_week_prev_year
 
 log = logging.getLogger(__name__)
 
@@ -60,9 +63,29 @@ def run_pipeline(weeks: list[str], *, dry_run: bool = False, skip_markdown: bool
     if skip_markdown:
         log.info("--- Step 4: Skipping markdown push (backfill mode) ---")
     else:
-        log.info("--- Step 4: Generating markdown stubs ---")
+        log.info("--- Step 4: Generating commentary & markdown stubs ---")
         weeks_with_data = sorted({d["week"] for d in dividends})
         for week in weeks_with_data:
-            push_markdown(week, dry_run=dry_run)
+            week_divs = [d for d in dividends if d["week"] == week]
+
+            # Aggregate comparison data from Firestore
+            log.info("  Fetching comparison data for %s …", week)
+            current_summary = summarize_week(week)
+            prev_summary = summarize_week(prev_week(week))
+            yoy_summary = summarize_week(same_week_prev_year(week))
+
+            log.info("  Current: %s | Prev: %s | YoY: %s",
+                     current_summary, prev_summary, yoy_summary)
+
+            # Generate LLM commentary
+            log.info("  Generating Gemini commentary …")
+            commentary = generate_commentary(
+                current=current_summary,
+                prev_week=prev_summary,
+                prev_year=yoy_summary,
+                dividends=week_divs,
+            )
+
+            push_markdown(week, commentary=commentary, dry_run=dry_run)
 
     log.info("=== Dividend pipeline finished ===")

@@ -35,6 +35,19 @@ def week_sunday(week_str: str) -> date:
     return sunday
 
 
+def prev_week(week_str: str) -> str:
+    """Return the ISO week string for the week before *week_str*."""
+    monday, _ = week_to_date_range(week_str)
+    return date_to_week(monday - timedelta(days=1))
+
+
+def same_week_prev_year(week_str: str) -> str:
+    """Return the same ISO week number but one year earlier."""
+    _, wn = _parse_week(week_str)
+    year, _ = _parse_week(week_str)
+    return f"{year - 1}-W{wn:02d}"
+
+
 def parse_week_arg(raw: str) -> str:
     """Normalise user input like ``2026-17`` or ``2026-W3`` → ``2026-W17`` / ``2026-W03``."""
     raw = raw.strip().upper()
