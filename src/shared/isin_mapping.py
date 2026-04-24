@@ -106,22 +106,22 @@ def _write_mapping(isin: str, data: dict, *, dry_run: bool = False) -> None:
 # ── Public API ──────────────────────────────────────────────────────
 
 
-def enrich_dividends(
-    dividends: list[dict], *, dry_run: bool = False
+def enrich_records(
+    records: list[dict], *, dry_run: bool = False
 ) -> list[dict]:
-    """Resolve ISINs to tickers + metadata for all dividends.
+    """Resolve ISINs to tickers + metadata for all records (dividends or transactions).
 
     - Checks Firestore ``instrument_mappings`` cache first
     - Calls OpenFIGI for unknown ISINs (one batch request)
     - Writes new mappings to Firestore
-    - Enriches each dividend dict with ``ticker`` from the mapping
+    - Enriches each record dict with ``ticker`` from the mapping
 
-    Returns the enriched dividends list (mutated in place).
+    Returns the enriched records list (mutated in place).
     """
     # Collect unique ISINs
-    isins = sorted({d["isin"] for d in dividends if d.get("isin")})
+    isins = sorted({d["isin"] for d in records if d.get("isin")})
     if not isins:
-        return dividends
+        return records
 
     log.info("Resolving %d unique ISIN(s): %s", len(isins), ", ".join(isins))
 
@@ -153,18 +153,22 @@ def enrich_dividends(
             if data:
                 _write_mapping(isin, data, dry_run=dry_run)
 
-    # 4. Build final lookup and enrich dividends
+    # 4. Build final lookup and enrich records
     lookup: dict[str, dict] = {**known}
     for isin, data in resolved.items():
         if data:
             lookup[isin] = data
 
-    for div in dividends:
-        isin = div.get("isin", "")
+    for record in records:
+        isin = record.get("isin", "")
         mapping = lookup.get(isin)
         if mapping:
-            div["ticker"] = mapping.get("ticker") or ""
+            record["ticker"] = mapping.get("ticker") or ""
         else:
-            div["ticker"] = ""
+            record["ticker"] = ""
 
-    return dividends
+    return records
+
+
+# Backward-compatible alias
+enrich_dividends = enrich_records

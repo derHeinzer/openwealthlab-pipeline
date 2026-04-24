@@ -46,8 +46,9 @@ def _from_firestore_value(fv: dict) -> Any:
     return str(fv)
 
 
-def _doc_url(doc_id: str | None = None) -> str:
-    base = f"{settings.FIRESTORE_BASE_URL}/{settings.FIRESTORE_COLLECTION}"
+def _doc_url(doc_id: str | None = None, collection: str | None = None) -> str:
+    coll = collection or settings.FIRESTORE_COLLECTION
+    base = f"{settings.FIRESTORE_BASE_URL}/{coll}"
     if doc_id:
         return f"{base}/{doc_id}"
     return base
@@ -56,44 +57,45 @@ def _doc_url(doc_id: str | None = None) -> str:
 # ── Public API ──────────────────────────────────────────────────────
 
 
-def create_document(data: dict, doc_id: str | None = None) -> dict:
+def create_document(data: dict, doc_id: str | None = None, *, collection: str | None = None) -> dict:
     """Create a Firestore document.  Returns the created document."""
     fields = {k: _to_firestore_value(v) for k, v in data.items()}
     body: dict[str, Any] = {"fields": fields}
 
     if doc_id:
-        url = _doc_url()
+        url = _doc_url(collection=collection)
         params = {"documentId": doc_id}
     else:
-        url = _doc_url()
+        url = _doc_url(collection=collection)
         params = {}
 
     resp = httpx.post(url, json=body, headers=_headers(), params=params, timeout=15)
     if resp.status_code == 409:
         log.info("Document already exists, updating: %s", doc_id)
-        return update_document(doc_id, data)
+        return update_document(doc_id, data, collection=collection)
     resp.raise_for_status()
     return resp.json()
 
 
-def update_document(doc_id: str, data: dict) -> dict:
+def update_document(doc_id: str, data: dict, *, collection: str | None = None) -> dict:
     """Patch (upsert) a Firestore document."""
     fields = {k: _to_firestore_value(v) for k, v in data.items()}
     body: dict[str, Any] = {"fields": fields}
     params = [("updateMask.fieldPaths", k) for k in data]
     resp = httpx.patch(
-        _doc_url(doc_id), json=body, headers=_headers(), params=params, timeout=15
+        _doc_url(doc_id, collection=collection), json=body, headers=_headers(), params=params, timeout=15
     )
     resp.raise_for_status()
     return resp.json()
 
 
-def query_by_week(week: str) -> list[dict]:
-    """Query dividend_payments where week == ``week``."""
+def query_by_week(week: str, *, collection: str | None = None) -> list[dict]:
+    """Query documents where week == ``week``."""
+    coll = collection or settings.FIRESTORE_COLLECTION
     url = f"{settings.FIRESTORE_BASE_URL}:runQuery"
     body = {
         "structuredQuery": {
-            "from": [{"collectionId": settings.FIRESTORE_COLLECTION}],
+            "from": [{"collectionId": coll}],
             "where": {
                 "fieldFilter": {
                     "field": {"fieldPath": "week"},

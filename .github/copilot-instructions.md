@@ -15,7 +15,7 @@ This repo collects real financial data (dividends, portfolio transactions, marke
 ## Architecture
 
 ```
-Broker API → collect.py → write_firestore.py → Firestore (dividend_payments)
+Broker API → collect.py → write_firestore.py → Firestore (dividend_payments / portfolio_transactions)
                                               → generate_markdown.py → GitHub API → openwealthlab repo
 ```
 
@@ -76,6 +76,28 @@ Document ID = ISIN. Cached results from OpenFIGI API v3.
 }
 ```
 
+### Collection: `portfolio_transactions` (prod) / `dev_portfolio_transactions` (dev)
+
+Document ID = `{date}_{isin}_{type}` (e.g. `2026-04-21_US0378331005_buy`).
+
+```python
+{
+    "date": "2026-04-21",               # str, YYYY-MM-DD (execution date)
+    "type": "buy",                       # str, "buy" or "sell"
+    "stock": "Apple Inc.",               # str, full company name
+    "isin": "US0378331005",             # str, ISIN from Trade Republic
+    "ticker": "AAPL",                    # str, ticker symbol (resolved via OpenFIGI)
+    "shares": 10,                        # int or float
+    "price_per_share": 150.25,           # float
+    "total_amount": 1502.50,             # float
+    "currency": "EUR",                   # str, ISO currency code
+    "fees": 1.00,                        # float, transaction fees
+    "is_savings_plan": false,            # bool, true if savings plan execution
+    "week": "2026-W17",                  # str, ISO week (YYYY-Wnn)
+    "year": 2026,                        # int
+}
+```
+
 ### Firestore Connection
 
 - Project ID: `openwealthlab`
@@ -85,6 +107,8 @@ Document ID = ISIN. Cached results from OpenFIGI API v3.
 - Auth flow: Create signed JWT → exchange for access token at `https://oauth2.googleapis.com/token`
 
 ## Markdown Stub Format
+
+### Dividend Reports
 
 Generated files are pushed to `openwealthlab` repo at `src/content/dividend-logs/{week}.md`:
 
@@ -105,12 +129,34 @@ The table and charts below are loaded live from the dividend database.
 
 The frontmatter fields `type: "weekly-report"` and `week` are required — they trigger the React components on the website to fetch live data from Firestore via `/api/dividends?week=YYYY-Wnn`.
 
+### Portfolio Logs
+
+Generated files are pushed to `openwealthlab` repo at `src/content/portfolio-logs/{week}.md`:
+
+```markdown
+---
+title: "Portfolio Log – Week {week_num}, {year}"
+date: {sunday_date}
+summary: "Weekly portfolio activity in calendar week {week_num}, {year}."
+tags: ["portfolio", "weekly-log", "{year}"]
+type: "portfolio-log"
+week: "{year}-W{week_num}"
+draft: false
+---
+
+This is an automated weekly portfolio log.
+The table and charts below are loaded live from the portfolio database.
+```
+
+The frontmatter field `type: "portfolio-log"` triggers portfolio-specific React components on the website.
+
 ## Target Repo Structure (for generated files)
 
 Files are committed to `derHeinzer/openwealthlab`:
-- Path: `src/content/dividend-logs/{week}.md` (e.g. `2026-w17.md`)
+- Dividend reports: `src/content/dividend-logs/{week}.md` (e.g. `2026-w17.md`)
+- Portfolio logs: `src/content/portfolio-logs/{week}.md` (e.g. `2026-w17.md`)
 - Branch: `main`
-- Commit message: `chore: add dividend report {week}` (automated)
+- Commit messages: `chore: add dividend report {week}` / `chore: add portfolio log {week}` (automated)
 
 ## GitHub Secrets Required
 
@@ -122,18 +168,21 @@ Files are committed to `derHeinzer/openwealthlab`:
 
 ## Pipeline Jobs
 
-### 1. Weekly Dividend Report (Sunday 18:00 UTC)
+### 1. Weekly Pipeline (Sunday 18:00 UTC)
 
-Workflow: `.github/workflows/weekly-dividends.yml`
+Runs both dividend and portfolio pipelines. Controlled via CLI flags:
+- `--dividends` / `--portfolio` — select which pipeline(s) to run (both by default)
+- `--push-dividend-md` / `--push-portfolio-md` — control markdown generation independently
+- When markdown is not pushed, Gemini commentary and week-over-week aggregation are skipped
 
-Steps:
-1. `collect.py` — Query broker API for dividend payments received in the past week
-2. `write_firestore.py` — Write each payment as a document to Firestore `dividend_payments`
-3. `generate_markdown.py` — Create MD stub and push to `derHeinzer/openwealthlab` via GitHub API
+Steps per pipeline:
+1. `tr_client.py` — Query Trade Republic for events (dividends or buy/sell transactions)
+2. `isin_mapping.py` — Resolve ISINs to tickers via OpenFIGI (cached in Firestore)
+3. `write_firestore.py` — Write documents to Firestore (`dividend_payments` or `portfolio_transactions`)
+4. `generate_markdown.py` — Create MD stub and push to `derHeinzer/openwealthlab` via GitHub API
 
 ### Future Jobs (not yet implemented)
 
-- Portfolio Logs — buy/sell transactions
 - Monthly Reports — monthly performance aggregation
 - Market Data — stock prices, fundamentals for experiments
 

@@ -36,14 +36,18 @@ This saves session cookies locally and prints a base64-encoded version for CI us
 ### 4. Run the pipeline
 
 ```bash
-# Current week (default) — fetches dividends, writes to Firestore, pushes markdown
+# Current week (default) — fetches dividends + portfolio, writes to Firestore, pushes markdown
 python main.py run
+
+# Run only dividends or only portfolio
+python main.py run --dividends
+python main.py run --portfolio
 
 # Specific weeks (backfill) — fetches + writes, but skips markdown push by default
 python main.py run --weeks 2026-W17 2026-W01
 
 # Backfill with markdown push
-python main.py run --weeks 2026-W17 --push-markdown
+python main.py run --weeks 2026-W17 --push-dividend-md --push-portfolio-md
 
 # Preview without writing
 python main.py run --dry-run
@@ -54,12 +58,15 @@ python main.py run -v debug
 
 ### Pipeline Steps
 
-1. **Fetch** — Query Trade Republic for dividend payments in the given weeks
+Each pipeline (dividends + portfolio) follows the same flow:
+
+1. **Fetch** — Query Trade Republic for dividend payments / buy+sell transactions in the given weeks
 2. **Enrich** — Resolve ISINs to tickers via OpenFIGI (cached in Firestore `instrument_mappings`)
-3. **Write** — Upsert dividend documents to Firestore (idempotent, safe to re-run)
+3. **Write** — Upsert documents to Firestore (idempotent, safe to re-run)
 4. **Markdown** — Generate weekly report stubs and push to `derHeinzer/openwealthlab` via GitHub API
 
-Step 4 is skipped when using `--weeks` (backfill mode) unless `--push-markdown` is given.
+Step 4 is skipped when using `--weeks` (backfill mode) unless `--push-dividend-md` / `--push-portfolio-md` is given.
+When markdown is not pushed, Gemini commentary generation and week-over-week aggregation are also skipped.
 
 ## GCP Deployment (Cloud Run Job)
 
@@ -103,14 +110,17 @@ src/
     auth.py                      # Google OAuth2 (JWT → access token)
     firestore_client.py          # Firestore REST API client
     github_client.py             # GitHub API for pushing files
+    tr_client.py                 # Trade Republic API via pytr
     week_utils.py                # ISO week helpers
     openfigi_client.py           # OpenFIGI v3 ISIN → ticker resolution
     isin_mapping.py              # Firestore-cached ISIN enrichment
   dividends/
-    tr_client.py                 # Trade Republic API via pytr
-    collect.py                   # Pipeline orchestrator
+    collect.py                   # Pipeline orchestrator (dividends + portfolio)
     write_firestore.py           # Write dividends to Firestore
-    generate_markdown.py         # Generate & push MD stubs
+    generate_markdown.py         # Generate & push dividend MD stubs
+  portfolio/
+    write_firestore.py           # Write transactions to Firestore
+    generate_markdown.py         # Generate & push portfolio MD stubs
 deploy/setup-gcp.sh             # GCP infrastructure setup
 Dockerfile                       # Container for Cloud Run
 tests/                           # pytest tests

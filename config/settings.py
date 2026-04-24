@@ -31,6 +31,9 @@ FIRESTORE_COLLECTION = (
 FIRESTORE_MAPPING_COLLECTION = (
     "instrument_mappings" if PIPELINE_ENV == "prod" else "dev_instrument_mappings"
 )
+FIRESTORE_PORTFOLIO_COLLECTION = (
+    "portfolio_transactions" if PIPELINE_ENV == "prod" else "dev_portfolio_transactions"
+)
 
 
 def get_service_account_info() -> dict:
@@ -47,6 +50,7 @@ def get_service_account_info() -> dict:
 OWL_GITHUB_TOKEN: str = os.environ.get("OWL_GITHUB_TOKEN", "")
 OWL_GITHUB_REPO = "derHeinzer/openwealthlab"
 OWL_CONTENT_PATH = "src/content/dividend-logs"
+OWL_PORTFOLIO_CONTENT_PATH = "src/content/portfolio-logs"
 
 # ── Gemini (Google AI Studio) ──────────────────────────────────────
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")

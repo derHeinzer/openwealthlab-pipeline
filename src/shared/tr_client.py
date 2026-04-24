@@ -1,4 +1,4 @@
-"""Trade Republic API client — wraps pytr for dividend extraction."""
+"""Trade Republic API client — wraps pytr for dividend and transaction extraction."""
 
 from __future__ import annotations
 
@@ -97,18 +97,26 @@ def export_cookies_base64() -> str:
     return base64.b64encode(cookie_file.read_bytes()).decode()
 
 
-# ── Fetch dividends ─────────────────────────────────────────────────
+# ── Shared timeline fetch ────────────────────────────────────────────
+
+_SAVINGS_PLAN_EVENT_TYPES = {
+    "SAVINGS_PLAN_EXECUTED",
+    "SAVINGS_PLAN_INVOICE_CREATED",
+    "trading_savingsplan_executed",
+}
+
+_SAVINGS_PLAN_SUBTITLES = {
+    "Sparplan ausgeführt",
+}
 
 
-def fetch_dividends(weeks: list[str]) -> list[dict]:
-    """Fetch dividend events from Trade Republic for the given ISO weeks.
+def _fetch_timeline(weeks: list[str]) -> list[tuple[dict, "Event"]]:
+    """Fetch and parse all timeline events for the given ISO weeks.
 
-    Returns a list of dicts matching the Firestore ``dividend_payments`` schema.
+    Returns a list of ``(raw_event_dict, parsed_Event)`` tuples.
     """
-    from pytr.event import Event, PPEventType
+    from pytr.event import Event
     from pytr.timeline import Timeline
-
-    week_set = set(weeks)
 
     # Compute the overall date window
     all_mondays, all_sundays = zip(*(week_to_date_range(w) for w in weeks))
@@ -143,10 +151,28 @@ def fetch_dividends(weeks: list[str]) -> list[dict]:
 
     log.info("Received %d timeline events total.", len(raw_events))
 
-    # Parse & filter for dividends in the target weeks
-    dividends: list[dict] = []
+    parsed: list[tuple[dict, Event]] = []
     for raw in raw_events:
         event = Event.from_dict(raw)
+        parsed.append((raw, event))
+    return parsed
+
+
+# ── Fetch dividends ─────────────────────────────────────────────────
+
+
+def fetch_dividends(weeks: list[str]) -> list[dict]:
+    """Fetch dividend events from Trade Republic for the given ISO weeks.
+
+    Returns a list of dicts matching the Firestore ``dividend_payments`` schema.
+    """
+    from pytr.event import PPEventType
+
+    week_set = set(weeks)
+    all_events = _fetch_timeline(weeks)
+
+    dividends: list[dict] = []
+    for raw, event in all_events:
         if event.event_type != PPEventType.DIVIDEND:
             continue
 
@@ -181,3 +207,71 @@ def fetch_dividends(weeks: list[str]) -> list[dict]:
 
     log.info("Found %d dividend payments in target weeks.", len(dividends))
     return dividends
+
+
+# ── Fetch transactions (buy / sell) ─────────────────────────────────
+
+
+def fetch_transactions(weeks: list[str]) -> list[dict]:
+    """Fetch buy/sell events from Trade Republic for the given ISO weeks.
+
+    Returns a list of dicts matching the Firestore ``portfolio_transactions`` schema.
+    """
+    from pytr.event import ConditionalEventType, PPEventType
+
+    trade_types = (PPEventType.BUY, PPEventType.SELL, ConditionalEventType.TRADE_INVOICE)
+
+    week_set = set(weeks)
+    all_events = _fetch_timeline(weeks)
+
+    transactions: list[dict] = []
+    for raw, event in all_events:
+        if event.event_type not in trade_types:
+            continue
+
+        tx_date = event.date.date()
+        week = date_to_week(tx_date)
+        if week not in week_set:
+            continue
+
+        # For TRADE_INVOICE (savings plans, regular trades) determine buy/sell from value sign
+        if event.event_type == ConditionalEventType.TRADE_INVOICE:
+            tx_type = "sell" if (event.value or 0) >= 0 else "buy"
+        else:
+            tx_type = "buy" if event.event_type == PPEventType.BUY else "sell"
+        total_amount = abs(event.value) if event.value else 0.0
+        fees = abs(event.fees) if event.fees else 0.0
+        tax = abs(event.taxes) if event.taxes else 0.0
+        shares = event.shares or 0.0
+        price_per_share = round(total_amount / shares, 6) if shares else 0.0
+        currency = raw.get("amount", {}).get("currency", "EUR")
+
+        # Detect savings plan executions (via eventType OR subtitle)
+        raw_event_type = raw.get("eventType", "")
+        raw_subtitle = raw.get("subtitle", "")
+        is_savings_plan = (
+            raw_event_type in _SAVINGS_PLAN_EVENT_TYPES
+            or raw_subtitle in _SAVINGS_PLAN_SUBTITLES
+        )
+
+        transactions.append(
+            {
+                "date": tx_date.isoformat(),
+                "type": tx_type,
+                "stock": raw.get("title", "Unknown"),
+                "isin": event.isin or "",
+                "ticker": "",  # resolved later via OpenFIGI
+                "shares": int(shares) if shares == int(shares) else shares,
+                "price_per_share": price_per_share,
+                "total_amount": total_amount,
+                "currency": currency,
+                "fees": fees,
+                "tax_withheld": tax,
+                "is_savings_plan": is_savings_plan,
+                "week": week,
+                "year": tx_date.year,
+            }
+        )
+
+    log.info("Found %d transactions (buy/sell) in target weeks.", len(transactions))
+    return transactions
